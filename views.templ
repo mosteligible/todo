@@ -1,0 +1,174 @@
+package main
+
+import "strconv"
+
+templ Page(content templ.Component) {
+	<!doctype html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<meta name="theme-color" content="#345647"/>
+			<meta name="htmx-config" content='{"allowEval":false,"includeIndicatorStyles":false,"historyCacheSize":0}'/>
+			<title>Daylist — Make room for what matters</title>
+			<link rel="icon" href="data:,"/>
+			<link rel="stylesheet" href="/static/style.css"/>
+			<script src="/assets/htmx.min.js" defer></script>
+			<script src="/static/app.js" defer></script>
+		</head>
+		<body>
+			<header class="site-header">
+				<a class="brand" href="/" aria-label="Daylist home"><span class="brand-mark" aria-hidden="true"></span>daylist<span class="brand-dot">.</span></a>
+				<span class="header-note">A clear mind starts here.</span>
+			</header>
+			<main>@content</main>
+			<p id="network-error" class="network-error" role="alert" hidden></p>
+			<footer class="site-footer"><span>Small steps. Meaningful days.</span><span>Made simple with Go + templ + HTMX</span></footer>
+		</body>
+	</html>
+}
+
+templ FormFields(data BoardData) {
+	<input type="hidden" name="csrf_token" value={ data.Token }/>
+	<input type="hidden" name="filter" value={ data.Selected }/>
+}
+
+templ FilterLink(data BoardData, value string, label string, count int) {
+	<a href={ templ.SafeURL("/?filter=" + value) } hx-get={ "/?filter=" + value } hx-push-url="true" class={ "filter", templ.KV("selected", data.Selected == value) }
+		if data.Selected == value {
+			aria-current="page"
+		}
+	>{ label } <span>{ strconv.Itoa(count) }</span></a>
+}
+
+templ Board(data BoardData) {
+	<section id="workspace" hx-target="#workspace" hx-swap="outerHTML" hx-sync="this:queue all">
+		<div class="intro">
+			<p class="eyebrow"><span class="status-dot"></span> YOUR EVERYDAY, A LITTLE LIGHTER</p>
+			<h1>A little space to focus.</h1>
+			<p class="subtitle">Get it out of your head. Take it one task at a time.</p>
+		</div>
+		<div class="dashboard">
+			<aside class="overview" aria-label="Your progress">
+				<div class="overview-heading"><span class="eyebrow">THE BIG PICTURE</span><span class="small-mark" aria-hidden="true">/</span></div>
+				<div class="big-number">{ strconv.Itoa(data.Active()) }<span>tasks to go</span></div>
+				<p class="overview-copy">
+					if data.Total == 0 {
+						Every good day starts with a little intention.
+					} else if data.Active() == 0 {
+						All clear. Take a breath — you’ve earned it.
+					} else {
+						No rush. Just a little progress, one thing at a time.
+					}
+				</p>
+				<div class="progress-heading"><span>Your progress</span><strong>{ strconv.Itoa(data.Progress()) }%</strong></div>
+				<progress value={ strconv.Itoa(data.Completed) } max={ strconv.Itoa(max(data.Total, 1)) } aria-label="Completed tasks">{ strconv.Itoa(data.Completed) } of { strconv.Itoa(data.Total) }</progress>
+				<div class="progress-caption">{ strconv.Itoa(data.Completed) } of { strconv.Itoa(data.Total) } tasks completed</div>
+				<div class="aside-bottom"><span class="decorative-lines" aria-hidden="true"></span><p>Less on your mind.<br/>More room for your day.</p></div>
+			</aside>
+			<div class="task-panel">
+				<div class="panel-heading"><div><p class="eyebrow">MAKE A LITTLE ROOM</p><h2>My tasks<span class="task-total">{ strconv.Itoa(data.Total) }</span></h2></div><span class="saved-label"><span class="status-dot"></span> Saved locally</span></div>
+				<form class="add-form" id="add-task" method="post" action="/todos" hx-post="/todos" hx-disabled-elt="find button">
+					@FormFields(data)
+					<label class="sr-only" for="new-title">New task</label>
+					<span class="input-plus" aria-hidden="true">+</span>
+					<input id="new-title" name="title" placeholder="What would you like to get done?" value={ data.Draft } maxlength="240" required autocomplete="off"/>
+					<button class="primary-button" type="submit">Add task <span aria-hidden="true">↗</span></button>
+				</form>
+				if data.Error != "" {
+					<p class="validation-error" role="alert">{ data.Error }</p>
+				}
+				<div class="list-toolbar">
+					<nav class="filters" aria-label="Filter tasks">
+						@FilterLink(data, "all", "All tasks", data.Total)
+						@FilterLink(data, "active", "Active", data.Active())
+						@FilterLink(data, "completed", "Completed", data.Completed)
+					</nav>
+					<span class="list-note">One thing at a time</span>
+				</div>
+				<div class="task-list" aria-label="Tasks">
+					for _, task := range data.Tasks {
+						@TaskRow(data, task)
+					}
+					if len(data.Tasks) == 0 {
+						@EmptyState(data)
+					}
+				</div>
+				<div class="panel-footer"><span class="status-dot"></span><span role="status">
+					if data.Notice != "" {
+						<span class="sr-only">{ data.Notice }. </span>
+					}
+					{ strconv.Itoa(data.Active()) }
+					if data.Active() == 1 {
+						 task remaining
+					} else {
+						 tasks remaining
+					}
+				</span><span class="footer-hint">A little progress is still progress.</span></div>
+			</div>
+		</div>
+	</section>
+}
+
+templ TaskRow(data BoardData, task Task) {
+	<article class={ "task", templ.KV("is-complete", task.Completed) } data-task-id={ strconv.FormatInt(task.ID, 10) }>
+		<div class="task-row">
+			<form method="post" action={ templ.SafeURL(task.URL("toggle")) } hx-post={ task.URL("toggle") } hx-disabled-elt="find button">
+				@FormFields(data)
+				<button class="check-button" type="submit" aria-label={ task.ToggleLabel() } aria-pressed={ strconv.FormatBool(task.Completed) }><span aria-hidden="true">
+					if task.Completed {
+						✓
+					}
+				</span></button>
+			</form>
+			<span class="task-title">{ task.Title }</span>
+			<form class="delete-form" method="post" action={ templ.SafeURL(task.URL("delete")) } hx-post={ task.URL("delete") } hx-confirm="Delete this task?" hx-disabled-elt="find button">
+				@FormFields(data)
+				<button class="delete-button" type="submit" aria-label={ "Delete " + task.Title } title="Delete task">×</button>
+			</form>
+		</div>
+		<details class="edit-details">
+			<summary aria-label={ "Edit " + task.Title }>Edit task</summary>
+			<form class="edit-form" method="post" action={ templ.SafeURL(task.URL("edit")) } hx-post={ task.URL("edit") } hx-disabled-elt="find button">
+				@FormFields(data)
+				<label class="sr-only" for={ "edit-" + strconv.FormatInt(task.ID, 10) }>Task name</label>
+				<input id={ "edit-" + strconv.FormatInt(task.ID, 10) } name="title" value={ task.Title } maxlength="240" required/>
+				<button class="primary-button" type="submit">Save</button>
+				<button class="secondary-button cancel-edit" type="button">Cancel</button>
+			</form>
+		</details>
+	</article>
+}
+
+templ EmptyState(data BoardData) {
+	<div class="empty-state">
+		<div class="empty-art" aria-hidden="true"><span class="paper"><i></i><i></i><i></i></span><span class="art-circle"></span></div>
+		<h3>
+			if data.Selected == "completed" {
+				Good things take small steps.
+			} else if data.Selected == "active" && data.Total > 0 {
+				Look at you. All done.
+			} else {
+				A fresh start, just for you.
+			}
+		</h3>
+		<p>
+			if data.Selected == "completed" {
+				Check off a task and it will find a home here.
+			} else if data.Selected == "active" && data.Total > 0 {
+				Nothing left to do. Enjoy a little breathing room.
+			} else {
+				Add your first task above.<br/>Big plans or little things — it all starts here.
+			}
+		</p>
+	</div>
+}
+
+templ ErrorView(status int, message string) {
+	<section class="error-page">
+		<p class="eyebrow">{ strconv.Itoa(status) }</p>
+		<h1>Let’s try that again.</h1>
+		<p>{ message }</p>
+		<a class="primary-button" href="/">Back to my tasks</a>
+	</section>
+}
